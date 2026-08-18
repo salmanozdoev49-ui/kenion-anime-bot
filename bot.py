@@ -1,4 +1,4 @@
-import os
+  import os
 import threading
 
 from flask import Flask
@@ -14,7 +14,15 @@ from telegram.ext import (
 
 TOKEN = os.environ["BOT_TOKEN"]
 
+# =========================================================
+# АДМИНИСТРАТОР
+# =========================================================
+
+# Сюда потом впиши свой Telegram ID
+ADMIN_ID = 0
+
 app = Flask(__name__)
+
 
 # =========================================================
 # ДАННЫЕ АНИМЕ
@@ -37,22 +45,27 @@ EPISODES = {
     12: "Красноречие и тишина: Финальная часть",
 }
 
+
 # =========================================================
 # ВИДЕО
-#
-# Формат:
-#
-# VIDEO_FILES[серия][качество] = file_id
-#
-# Например:
-# VIDEO_FILES[1]["720"] = "123456..."
-#
 # =========================================================
 
 VIDEO_FILES = {}
 
-# Здесь временно храним последнее полученное видео
+# Последнее отправленное администратором видео
 PENDING_VIDEOS = {}
+
+
+# =========================================================
+# ПРОВЕРКА АДМИНА
+# =========================================================
+
+def is_admin(update: Update):
+
+    return (
+        update.effective_user
+        and update.effective_user.id == ADMIN_ID
+    )
 
 
 # =========================================================
@@ -63,15 +76,30 @@ def main_menu():
 
     keyboard = [
         [
-            InlineKeyboardButton("📚 Каталог", callback_data="catalog"),
-            InlineKeyboardButton("🔥 Новинки", callback_data="new"),
+            InlineKeyboardButton(
+                "📚 Каталог",
+                callback_data="catalog"
+            ),
+            InlineKeyboardButton(
+                "🔥 Новинки",
+                callback_data="new"
+            ),
         ],
         [
-            InlineKeyboardButton("🔎 Поиск", callback_data="search"),
-            InlineKeyboardButton("⭐ Избранное", callback_data="favorites"),
+            InlineKeyboardButton(
+                "🔎 Поиск",
+                callback_data="search"
+            ),
+            InlineKeyboardButton(
+                "⭐ Избранное",
+                callback_data="favorites"
+            ),
         ],
         [
-            InlineKeyboardButton("ℹ️ О боте", callback_data="about"),
+            InlineKeyboardButton(
+                "ℹ️ О боте",
+                callback_data="about"
+            ),
         ],
     ]
 
@@ -205,10 +233,34 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================================================
+# /MYID
+# =========================================================
+
+async def myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    await update.message.reply_text(
+        f"🆔 Твой Telegram ID:\n"
+        f"{update.effective_user.id}"
+    )
+
+
+# =========================================================
 # ПОЛУЧЕНИЕ ВИДЕО
 # =========================================================
 
-async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def receive_video(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    # Только администратор может добавлять видео
+    if not is_admin(update):
+
+        await update.message.reply_text(
+            "❌ У тебя нет прав для добавления видео."
+        )
+
+        return
 
     video = update.message.video
 
@@ -217,25 +269,34 @@ async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
 
-    # Запоминаем последнее отправленное видео
     PENDING_VIDEOS[user_id] = video.file_id
 
     await update.message.reply_text(
         "✅ Видео получено!\n\n"
-        "Теперь напиши команду:\n\n"
+        "Теперь напиши:\n\n"
         "/set НОМЕР_СЕРИИ КАЧЕСТВО\n\n"
         "Например:\n"
-        "/set 1 720\n\n"
-        "Это сохранит видео как:\n"
-        "🎞 Серия 1 — 720p"
+        "/set 1 720"
     )
 
 
 # =========================================================
-# ПРИВЯЗКА ВИДЕО К СЕРИИ
+# /SET
 # =========================================================
 
-async def set_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def set_video(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    # Проверяем администратора
+    if not is_admin(update):
+
+        await update.message.reply_text(
+            "❌ У тебя нет прав для этой команды."
+        )
+
+        return
 
     user_id = update.effective_user.id
 
@@ -258,6 +319,7 @@ async def set_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
+
         episode = int(context.args[0])
         quality = context.args[1]
 
@@ -288,23 +350,35 @@ async def set_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_id = PENDING_VIDEOS[user_id]
 
     if episode not in VIDEO_FILES:
+
         VIDEO_FILES[episode] = {}
 
     VIDEO_FILES[episode][quality] = file_id
 
     await update.message.reply_text(
-        f"✅ Готово!\n\n"
+        f"✅ Видео сохранено!\n\n"
         f"🎞 Серия: {episode}\n"
-        f"⚙️ Качество: {quality}p\n\n"
-        "Видео привязано."
+        f"⚙️ Качество: {quality}p"
     )
 
 
 # =========================================================
-# ПРОВЕРКА ДОБАВЛЕННЫХ ВИДЕО
+# /VIDEOS
 # =========================================================
 
-async def videos_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def videos_list(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    # Только администратор
+    if not is_admin(update):
+
+        await update.message.reply_text(
+            "❌ У тебя нет прав для этой команды."
+        )
+
+        return
 
     if not VIDEO_FILES:
 
@@ -323,6 +397,7 @@ async def videos_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for quality in ["360", "480", "720"]:
 
             if quality in VIDEO_FILES[episode]:
+
                 qualities.append(f"{quality}p")
 
         text += (
@@ -340,7 +415,10 @@ async def videos_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # КНОПКИ
 # =========================================================
 
-async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def buttons(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
     query = update.callback_query
 
@@ -451,10 +529,11 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         episode = int(parts[1])
         quality = parts[2]
 
-        video = VIDEO_FILES.get(
-            episode,
-            {}
-        ).get(quality)
+        video = (
+            VIDEO_FILES
+            .get(episode, {})
+            .get(quality)
+        )
 
         if not video:
 
@@ -568,7 +647,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================================================
-# WEB SERVER
+# WEB SERVER ДЛЯ RENDER
 # =========================================================
 
 @app.route("/")
@@ -579,7 +658,12 @@ def web():
 
 def run_server():
 
-    port = int(os.environ.get("PORT", 10000))
+    port = int(
+        os.environ.get(
+            "PORT",
+            10000
+        )
+    )
 
     app.run(
         host="0.0.0.0",
@@ -600,22 +684,44 @@ def main():
         .build()
     )
 
+    # Обычные команды
     bot.add_handler(
-        CommandHandler("start", start)
+        CommandHandler(
+            "start",
+            start
+        )
     )
 
     bot.add_handler(
-        CommandHandler("set", set_video)
+        CommandHandler(
+            "myid",
+            myid
+        )
+    )
+
+    # Админские команды
+    bot.add_handler(
+        CommandHandler(
+            "set",
+            set_video
+        )
     )
 
     bot.add_handler(
-        CommandHandler("videos", videos_list)
+        CommandHandler(
+            "videos",
+            videos_list
+        )
     )
 
+    # Кнопки
     bot.add_handler(
-        CallbackQueryHandler(buttons)
+        CallbackQueryHandler(
+            buttons
+        )
     )
 
+    # Получение видео
     bot.add_handler(
         MessageHandler(
             filters.VIDEO,
@@ -623,11 +729,13 @@ def main():
         )
     )
 
+    # Запускаем веб-сервер
     threading.Thread(
         target=run_server,
         daemon=True
     ).start()
 
+    # Запускаем Telegram-бота
     bot.run_polling()
 
 
