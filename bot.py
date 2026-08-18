@@ -1,22 +1,15 @@
 import os
-from flask import Flask, request
+import threading
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-)
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 
-# Токен НЕ записываем в код.
 TOKEN = os.environ["BOT_TOKEN"]
 
 app = Flask(__name__)
 
-telegram_app = Application.builder().token(TOKEN).build()
+# ---------- Главное меню ----------
 
-
-# Главное меню
 def main_menu():
     keyboard = [
         [
@@ -31,12 +24,12 @@ def main_menu():
             InlineKeyboardButton("ℹ️ О боте", callback_data="about"),
         ],
     ]
-
     return InlineKeyboardMarkup(keyboard)
 
 
-# Команда /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ---------- /start ----------
+
+async def start(update: Update, context):
     text = (
         "🎌 <b>КАНЬОН АНИМЕ</b>\n\n"
         "Добро пожаловать! 🍿\n\n"
@@ -52,8 +45,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# Обработка кнопок
-async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ---------- Кнопки ----------
+
+async def buttons(update: Update, context):
     query = update.callback_query
     await query.answer()
 
@@ -64,8 +58,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
 
         await query.edit_message_text(
-            "📚 <b>Каталог</b>\n\n"
-            "Выбери аниме:",
+            "📚 <b>Каталог</b>\n\nВыбери аниме:",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
@@ -83,7 +76,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "search":
         await query.edit_message_text(
             "🔎 <b>Поиск</b>\n\n"
-            "Функцию поиска добавим следующим этапом.",
+            "Поиск добавим следующим этапом.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("⬅️ Назад", callback_data="home")]
@@ -138,8 +131,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
 
         await query.edit_message_text(
-            "📺 <b>Царство — 1 сезон</b>\n\n"
-            "Выбери серию:",
+            "📺 <b>Царство — 1 сезон</b>\n\nВыбери серию:",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
@@ -184,35 +176,32 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(CallbackQueryHandler(buttons))
+# ---------- Flask ----------
 
-
-@app.route("/", methods=["GET"])
+@app.route("/")
 def home():
     return "Kanyon Anime Bot is running!"
 
 
-@app.route("/webhook", methods=["POST"])
-async def webhook():
-    update = Update.de_json(request.get_json(force=True), telegram_app.bot)
-    await telegram_app.process_update(update)
-    return "OK"
+# ---------- Запуск ----------
+
+def run_server():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+
+def main():
+    bot = Application.builder().token(TOKEN).build()
+
+    bot.add_handler(CommandHandler("start", start))
+    bot.add_handler(CallbackQueryHandler(buttons))
+
+    # Веб-сервер запускаем отдельно
+    threading.Thread(target=run_server, daemon=True).start()
+
+    # Бот получает сообщения через polling
+    bot.run_polling()
 
 
 if __name__ == "__main__":
-    import asyncio
-
-    async def run():
-        await telegram_app.initialize()
-        await telegram_app.start()
-
-        port = int(os.environ.get("PORT", 10000))
-
-        from werkzeug.serving import run_simple
-        run_simple("0.0.0.0", port, app)
-
-        await telegram_app.stop()
-        await telegram_app.shutdown()
-
-    asyncio.run(run())
+    main()
