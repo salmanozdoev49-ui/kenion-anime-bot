@@ -1,13 +1,20 @@
 import os
 import threading
+
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 
 TOKEN = os.environ["BOT_TOKEN"]
 
 app = Flask(__name__)
-
 
 # =========================================================
 # ДАННЫЕ АНИМЕ
@@ -30,28 +37,22 @@ EPISODES = {
     12: "Красноречие и тишина: Финальная часть",
 }
 
-
 # =========================================================
 # ВИДЕО
+#
+# Формат:
+#
+# VIDEO_FILES[серия][качество] = file_id
+#
+# Например:
+# VIDEO_FILES[1]["720"] = "123456..."
+#
 # =========================================================
-#
-# Сюда позже можно добавить file_id видео,
-# которое ты сам загрузил в Telegram и имеешь право
-# распространять.
-#
-# Пример:
-#
-# VIDEO_FILES = {
-#     1: {
-#         "360": "FILE_ID_360",
-#         "480": "FILE_ID_480",
-#         "720": "FILE_ID_720",
-#     }
-# }
-#
-# Пока оставляем пустым.
 
 VIDEO_FILES = {}
+
+# Здесь временно храним последнее полученное видео
+PENDING_VIDEOS = {}
 
 
 # =========================================================
@@ -62,31 +63,16 @@ def main_menu():
 
     keyboard = [
         [
-            InlineKeyboardButton(
-                "📚 Каталог",
-                callback_data="catalog"
-            ),
-            InlineKeyboardButton(
-                "🔥 Новинки",
-                callback_data="new"
-            )
+            InlineKeyboardButton("📚 Каталог", callback_data="catalog"),
+            InlineKeyboardButton("🔥 Новинки", callback_data="new"),
         ],
         [
-            InlineKeyboardButton(
-                "🔎 Поиск",
-                callback_data="search"
-            ),
-            InlineKeyboardButton(
-                "⭐ Избранное",
-                callback_data="favorites"
-            )
+            InlineKeyboardButton("🔎 Поиск", callback_data="search"),
+            InlineKeyboardButton("⭐ Избранное", callback_data="favorites"),
         ],
         [
-            InlineKeyboardButton(
-                "ℹ️ О боте",
-                callback_data="about"
-            )
-        ]
+            InlineKeyboardButton("ℹ️ О боте", callback_data="about"),
+        ],
     ]
 
     return InlineKeyboardMarkup(keyboard)
@@ -110,7 +96,7 @@ def anime_card():
                 "⬅️ Назад",
                 callback_data="home"
             )
-        ]
+        ],
     ]
 
     text = (
@@ -137,18 +123,16 @@ def anime_card():
 def episodes_menu():
 
     keyboard = []
-
-    # Делаем по две серии в ряд
     row = []
 
     for episode in range(1, 13):
 
-        button = InlineKeyboardButton(
-            f"🎞 {episode}",
-            callback_data=f"episode_{episode}"
+        row.append(
+            InlineKeyboardButton(
+                f"🎞 {episode}",
+                callback_data=f"episode_{episode}"
+            )
         )
-
-        row.append(button)
 
         if len(row) == 2:
             keyboard.append(row)
@@ -186,14 +170,14 @@ def quality_menu(episode):
             InlineKeyboardButton(
                 "720p",
                 callback_data=f"quality_{episode}_720"
-            )
+            ),
         ],
         [
             InlineKeyboardButton(
                 "⬅️ К сериям",
                 callback_data="season1"
             )
-        ]
+        ],
     ]
 
     return InlineKeyboardMarkup(keyboard)
@@ -203,14 +187,13 @@ def quality_menu(episode):
 # /START
 # =========================================================
 
-async def start(update: Update, context):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = (
         "🎌 <b>КАНЬОН АНИМЕ</b>\n\n"
         "Добро пожаловать! 🍿\n\n"
         "Здесь ты сможешь находить аниме, "
         "смотреть серии и выбирать качество.\n\n"
-        "📚 Каталог постепенно пополняется.\n\n"
         "Выбери нужный раздел:"
     )
 
@@ -222,10 +205,142 @@ async def start(update: Update, context):
 
 
 # =========================================================
+# ПОЛУЧЕНИЕ ВИДЕО
+# =========================================================
+
+async def receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    video = update.message.video
+
+    if not video:
+        return
+
+    user_id = update.effective_user.id
+
+    # Запоминаем последнее отправленное видео
+    PENDING_VIDEOS[user_id] = video.file_id
+
+    await update.message.reply_text(
+        "✅ Видео получено!\n\n"
+        "Теперь напиши команду:\n\n"
+        "/set НОМЕР_СЕРИИ КАЧЕСТВО\n\n"
+        "Например:\n"
+        "/set 1 720\n\n"
+        "Это сохранит видео как:\n"
+        "🎞 Серия 1 — 720p"
+    )
+
+
+# =========================================================
+# ПРИВЯЗКА ВИДЕО К СЕРИИ
+# =========================================================
+
+async def set_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.effective_user.id
+
+    if user_id not in PENDING_VIDEOS:
+
+        await update.message.reply_text(
+            "❌ Сначала перешли мне видео."
+        )
+
+        return
+
+    if len(context.args) != 2:
+
+        await update.message.reply_text(
+            "❌ Неверный формат.\n\n"
+            "Используй:\n"
+            "/set 1 720"
+        )
+
+        return
+
+    try:
+        episode = int(context.args[0])
+        quality = context.args[1]
+
+    except ValueError:
+
+        await update.message.reply_text(
+            "❌ Номер серии должен быть числом."
+        )
+
+        return
+
+    if episode < 1 or episode > 12:
+
+        await update.message.reply_text(
+            "❌ Серия должна быть от 1 до 12."
+        )
+
+        return
+
+    if quality not in ["360", "480", "720"]:
+
+        await update.message.reply_text(
+            "❌ Качество должно быть 360, 480 или 720."
+        )
+
+        return
+
+    file_id = PENDING_VIDEOS[user_id]
+
+    if episode not in VIDEO_FILES:
+        VIDEO_FILES[episode] = {}
+
+    VIDEO_FILES[episode][quality] = file_id
+
+    await update.message.reply_text(
+        f"✅ Готово!\n\n"
+        f"🎞 Серия: {episode}\n"
+        f"⚙️ Качество: {quality}p\n\n"
+        "Видео привязано."
+    )
+
+
+# =========================================================
+# ПРОВЕРКА ДОБАВЛЕННЫХ ВИДЕО
+# =========================================================
+
+async def videos_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if not VIDEO_FILES:
+
+        await update.message.reply_text(
+            "📂 Видео пока не добавлены."
+        )
+
+        return
+
+    text = "📂 <b>Добавленные видео</b>\n\n"
+
+    for episode in sorted(VIDEO_FILES):
+
+        qualities = []
+
+        for quality in ["360", "480", "720"]:
+
+            if quality in VIDEO_FILES[episode]:
+                qualities.append(f"{quality}p")
+
+        text += (
+            f"🎞 Серия {episode}: "
+            f"{', '.join(qualities)}\n"
+        )
+
+    await update.message.reply_text(
+        text,
+        parse_mode="HTML"
+    )
+
+
+# =========================================================
 # КНОПКИ
 # =========================================================
 
-async def buttons(update: Update, context):
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
 
@@ -233,10 +348,9 @@ async def buttons(update: Update, context):
 
     data = query.data
 
-
-    # -----------------------------------------------------
+    # -------------------------
     # ГЛАВНАЯ
-    # -----------------------------------------------------
+    # -------------------------
 
     if data == "home":
 
@@ -247,10 +361,9 @@ async def buttons(update: Update, context):
             reply_markup=main_menu()
         )
 
-
-    # -----------------------------------------------------
+    # -------------------------
     # КАТАЛОГ
-    # -----------------------------------------------------
+    # -------------------------
 
     elif data == "catalog":
 
@@ -266,7 +379,7 @@ async def buttons(update: Update, context):
                     "⬅️ Назад",
                     callback_data="home"
                 )
-            ]
+            ],
         ]
 
         await query.edit_message_text(
@@ -276,10 +389,9 @@ async def buttons(update: Update, context):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
-
-    # -----------------------------------------------------
-    # КАРТОЧКА АНИМЕ
-    # -----------------------------------------------------
+    # -------------------------
+    # КАРТОЧКА
+    # -------------------------
 
     elif data == "anime":
 
@@ -291,10 +403,9 @@ async def buttons(update: Update, context):
             reply_markup=keyboard
         )
 
-
-    # -----------------------------------------------------
+    # -------------------------
     # СЕЗОН
-    # -----------------------------------------------------
+    # -------------------------
 
     elif data == "season1":
 
@@ -306,10 +417,9 @@ async def buttons(update: Update, context):
             reply_markup=episodes_menu()
         )
 
-
-    # -----------------------------------------------------
+    # -------------------------
     # СЕРИЯ
-    # -----------------------------------------------------
+    # -------------------------
 
     elif data.startswith("episode_"):
 
@@ -320,8 +430,8 @@ async def buttons(update: Update, context):
         text = (
             f"🎞 <b>Серия {episode} из 12</b>\n\n"
             f"<b>{title}</b>\n\n"
-            "🎙 Озвучка: будет указана после добавления\n"
-            "🎬 Выбери качество:"
+            "🎙 Озвучка: AniDUB\n\n"
+            "⚙️ Выбери качество:"
         )
 
         await query.edit_message_text(
@@ -330,10 +440,9 @@ async def buttons(update: Update, context):
             reply_markup=quality_menu(episode)
         )
 
-
-    # -----------------------------------------------------
+    # -------------------------
     # КАЧЕСТВО
-    # -----------------------------------------------------
+    # -------------------------
 
     elif data.startswith("quality_"):
 
@@ -342,33 +451,34 @@ async def buttons(update: Update, context):
         episode = int(parts[1])
         quality = parts[2]
 
-        # Проверяем, есть ли видео
-        video = VIDEO_FILES.get(episode, {}).get(quality)
+        video = VIDEO_FILES.get(
+            episode,
+            {}
+        ).get(quality)
 
-        if video:
-
-            await context.bot.send_video(
-                chat_id=query.message.chat_id,
-                video=video,
-                caption=(
-                    f"🎬 <b>Ведьма и чудовище</b>\n"
-                    f"🎞 Серия {episode}\n"
-                    f"⚙️ Качество: {quality}p"
-                ),
-                parse_mode="HTML"
-            )
-
-        else:
+        if not video:
 
             await query.answer(
-                f"Видео {quality}p пока не добавлено",
+                f"Видео {quality}p ещё не добавлено.",
                 show_alert=True
             )
 
+            return
 
-    # -----------------------------------------------------
+        await context.bot.send_video(
+            chat_id=query.message.chat_id,
+            video=video,
+            caption=(
+                f"🎬 <b>{ANIME_TITLE}</b>\n"
+                f"🎞 Серия {episode}\n"
+                f"⚙️ {quality}p"
+            ),
+            parse_mode="HTML"
+        )
+
+    # -------------------------
     # НОВИНКИ
-    # -----------------------------------------------------
+    # -------------------------
 
     elif data == "new":
 
@@ -389,20 +499,19 @@ async def buttons(update: Update, context):
                         "⬅️ Назад",
                         callback_data="home"
                     )
-                ]
+                ],
             ])
         )
 
-
-    # -----------------------------------------------------
+    # -------------------------
     # ПОИСК
-    # -----------------------------------------------------
+    # -------------------------
 
     elif data == "search":
 
         await query.edit_message_text(
             "🔎 <b>Поиск</b>\n\n"
-            "Полноценный поиск добавим следующим этапом.",
+            "Поиск добавим следующим этапом.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
@@ -414,16 +523,15 @@ async def buttons(update: Update, context):
             ])
         )
 
-
-    # -----------------------------------------------------
+    # -------------------------
     # ИЗБРАННОЕ
-    # -----------------------------------------------------
+    # -------------------------
 
     elif data == "favorites":
 
         await query.edit_message_text(
             "⭐ <b>Избранное</b>\n\n"
-            "Система избранного будет добавлена следующим этапом.",
+            "Здесь будут сохранённые аниме.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
@@ -435,10 +543,9 @@ async def buttons(update: Update, context):
             ])
         )
 
-
-    # -----------------------------------------------------
+    # -------------------------
     # О БОТЕ
-    # -----------------------------------------------------
+    # -------------------------
 
     elif data == "about":
 
@@ -447,8 +554,7 @@ async def buttons(update: Update, context):
             "🎌 Каталог аниме\n"
             "📺 Серии\n"
             "🎙 Озвучки\n"
-            "⚙️ Выбор качества\n\n"
-            "Новые возможности будут добавляться постепенно.",
+            "⚙️ Выбор качества",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
@@ -462,7 +568,7 @@ async def buttons(update: Update, context):
 
 
 # =========================================================
-# WEB SERVER ДЛЯ RENDER
+# WEB SERVER
 # =========================================================
 
 @app.route("/")
@@ -482,7 +588,7 @@ def run_server():
 
 
 # =========================================================
-# ЗАПУСК БОТА
+# ЗАПУСК
 # =========================================================
 
 def main():
@@ -499,7 +605,22 @@ def main():
     )
 
     bot.add_handler(
+        CommandHandler("set", set_video)
+    )
+
+    bot.add_handler(
+        CommandHandler("videos", videos_list)
+    )
+
+    bot.add_handler(
         CallbackQueryHandler(buttons)
+    )
+
+    bot.add_handler(
+        MessageHandler(
+            filters.VIDEO,
+            receive_video
+        )
     )
 
     threading.Thread(
@@ -511,5 +632,4 @@ def main():
 
 
 if __name__ == "__main__":
-
     main()
