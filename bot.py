@@ -19,7 +19,7 @@ TOKEN = os.environ["BOT_TOKEN"]
 # =========================================================
 
 # Сюда потом впиши свой Telegram ID
-ADMIN_ID = 0
+ADMIN_ID = 6502304303
 
 app = Flask(__name__)
 
