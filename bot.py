@@ -18,7 +18,6 @@ TOKEN = os.environ["BOT_TOKEN"]
 # АДМИНИСТРАТОР
 # =========================================================
 
-# Сюда потом впиши свой Telegram ID
 ADMIN_ID = 6502304303
 
 app = Flask(__name__)
@@ -29,6 +28,23 @@ app = Flask(__name__)
 # =========================================================
 
 ANIME_TITLE = "🧙‍♀️ Ведьма и чудовище"
+
+# Здесь будут все аниме каталога.
+# Сейчас добавлено только одно.
+
+ANIME_LIST = {
+    "В": [
+        {
+            "title": "🧙‍♀️ Ведьма и чудовище",
+            "callback": "anime"
+        }
+    ]
+}
+
+
+# =========================================================
+# СЕРИИ «ВЕДЬМА И ЧУДОВИЩЕ»
+# =========================================================
 
 EPISODES = {
     1: "Ведьма и город пылающего красного",
@@ -107,6 +123,93 @@ def main_menu():
 
 
 # =========================================================
+# АЛФАВИТ КАТАЛОГА
+# =========================================================
+
+def alphabet_menu():
+
+    letters = [
+        "А", "Б", "В", "Г", "Д", "Е", "Ё",
+        "Ж", "З", "И", "Й", "К", "Л", "М",
+        "Н", "О", "П", "Р", "С", "Т", "У",
+        "Ф", "Х", "Ц", "Ч", "Ш", "Щ", "Ъ",
+        "Ы", "Ь", "Э", "Ю", "Я"
+    ]
+
+    keyboard = []
+    row = []
+
+    for letter in letters:
+
+        row.append(
+            InlineKeyboardButton(
+                letter,
+                callback_data=f"letter_{letter}"
+            )
+        )
+
+        if len(row) == 7:
+            keyboard.append(row)
+            row = []
+
+    if row:
+        keyboard.append(row)
+
+    keyboard.append([
+        InlineKeyboardButton(
+            "⬅️ Назад",
+            callback_data="home"
+        )
+    ])
+
+    return InlineKeyboardMarkup(keyboard)
+
+
+# =========================================================
+# АНИМЕ НА ВЫБРАННУЮ БУКВУ
+# =========================================================
+
+def anime_by_letter(letter):
+
+    keyboard = []
+
+    anime_list = ANIME_LIST.get(letter, [])
+
+    for anime in anime_list:
+
+        keyboard.append([
+            InlineKeyboardButton(
+                anime["title"],
+                callback_data=anime["callback"]
+            )
+        ])
+
+    keyboard.append([
+        InlineKeyboardButton(
+            "⬅️ К буквам",
+            callback_data="catalog"
+        )
+    ])
+
+    return InlineKeyboardMarkup(keyboard)
+
+
+def anime_letter_text(letter):
+
+    if letter in ANIME_LIST and ANIME_LIST[letter]:
+
+        return (
+            f"🔤 <b>Аниме на букву «{letter}»</b>\n\n"
+            "Выбери аниме:"
+        )
+
+    return (
+        f"🔤 <b>Аниме на букву «{letter}»</b>\n\n"
+        "😔 Пока ничего нет."
+    )
+
+
+# =========================================================
 # КАРТОЧКА АНИМЕ
 # =========================================================
 
@@ -121,8 +224,8 @@ def anime_card():
         ],
         [
             InlineKeyboardButton(
-                "⬅️ Назад",
-                callback_data="home"
+                "⬅️ К каталогу",
+                callback_data="catalog"
             )
         ],
     ]
@@ -253,7 +356,6 @@ async def receive_video(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    # Только администратор может добавлять видео
     if not is_admin(update):
 
         await update.message.reply_text(
@@ -289,7 +391,6 @@ async def set_video(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    # Проверяем администратора
     if not is_admin(update):
 
         await update.message.reply_text(
@@ -371,7 +472,6 @@ async def videos_list(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    # Только администратор
     if not is_admin(update):
 
         await update.message.reply_text(
@@ -408,9 +508,7 @@ async def videos_list(
     await update.message.reply_text(
         text,
         parse_mode="HTML"
-    )
-
-
+)
 # =========================================================
 # КНОПКИ
 # =========================================================
@@ -426,9 +524,9 @@ async def buttons(
 
     data = query.data
 
-    # -------------------------
+    # =====================================================
     # ГЛАВНАЯ
-    # -------------------------
+    # =====================================================
 
     if data == "home":
 
@@ -439,37 +537,36 @@ async def buttons(
             reply_markup=main_menu()
         )
 
-    # -------------------------
+    # =====================================================
     # КАТАЛОГ
-    # -------------------------
+    # =====================================================
 
     elif data == "catalog":
 
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    "🧙‍♀️ Ведьма и чудовище",
-                    callback_data="anime"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "⬅️ Назад",
-                    callback_data="home"
-                )
-            ],
-        ]
-
         await query.edit_message_text(
-            "📚 <b>Каталог</b>\n\n"
-            "Выбери аниме:",
+            "📚 <b>Каталог аниме</b>\n\n"
+            "Выбери первую букву названия:",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=alphabet_menu()
         )
 
-    # -------------------------
-    # КАРТОЧКА
-    # -------------------------
+    # =====================================================
+    # БУКВА
+    # =====================================================
+
+    elif data.startswith("letter_"):
+
+        letter = data.split("_", 1)[1]
+
+        await query.edit_message_text(
+            anime_letter_text(letter),
+            parse_mode="HTML",
+            reply_markup=anime_by_letter(letter)
+        )
+
+    # =====================================================
+    # КАРТОЧКА «ВЕДЬМА И ЧУДОВИЩЕ»
+    # =====================================================
 
     elif data == "anime":
 
@@ -481,9 +578,9 @@ async def buttons(
             reply_markup=keyboard
         )
 
-    # -------------------------
+    # =====================================================
     # СЕЗОН
-    # -------------------------
+    # =====================================================
 
     elif data == "season1":
 
@@ -495,9 +592,9 @@ async def buttons(
             reply_markup=episodes_menu()
         )
 
-    # -------------------------
+    # =====================================================
     # СЕРИЯ
-    # -------------------------
+    # =====================================================
 
     elif data.startswith("episode_"):
 
@@ -518,9 +615,9 @@ async def buttons(
             reply_markup=quality_menu(episode)
         )
 
-    # -------------------------
+    # =====================================================
     # КАЧЕСТВО
-    # -------------------------
+    # =====================================================
 
     elif data.startswith("quality_"):
 
@@ -555,9 +652,9 @@ async def buttons(
             parse_mode="HTML"
         )
 
-    # -------------------------
+    # =====================================================
     # НОВИНКИ
-    # -------------------------
+    # =====================================================
 
     elif data == "new":
 
@@ -582,15 +679,15 @@ async def buttons(
             ])
         )
 
-    # -------------------------
+    # =====================================================
     # ПОИСК
-    # -------------------------
+    # =====================================================
 
     elif data == "search":
 
         await query.edit_message_text(
             "🔎 <b>Поиск</b>\n\n"
-            "Поиск добавим следующим этапом.",
+            "Напиши название аниме обычным сообщением.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [
@@ -602,9 +699,9 @@ async def buttons(
             ])
         )
 
-    # -------------------------
+    # =====================================================
     # ИЗБРАННОЕ
-    # -------------------------
+    # =====================================================
 
     elif data == "favorites":
 
@@ -622,9 +719,9 @@ async def buttons(
             ])
         )
 
-    # -------------------------
+    # =====================================================
     # О БОТЕ
-    # -------------------------
+    # =====================================================
 
     elif data == "about":
 
@@ -644,6 +741,70 @@ async def buttons(
                 ]
             ])
         )
+
+
+# =========================================================
+# ПОИСК ПО НАЗВАНИЮ
+# =========================================================
+
+async def search_text(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    if not update.message or not update.message.text:
+        return
+
+    text = update.message.text.strip()
+
+    if text.startswith("/"):
+        return
+
+    query = text.lower()
+
+    results = []
+
+    for letter, anime_list in ANIME_LIST.items():
+
+        for anime in anime_list:
+
+            if query in anime["title"].lower():
+
+                results.append(anime)
+
+    if not results:
+
+        await update.message.reply_text(
+            "🔎 Ничего не найдено.\n\n"
+            "Попробуй другое название.",
+            reply_markup=main_menu()
+        )
+
+        return
+
+    keyboard = []
+
+    for anime in results:
+
+        keyboard.append([
+            InlineKeyboardButton(
+                anime["title"],
+                callback_data=anime["callback"]
+            )
+        ])
+
+    keyboard.append([
+        InlineKeyboardButton(
+            "⬅️ Назад",
+            callback_data="home"
+        )
+    ])
+
+    await update.message.reply_text(
+        "🔎 <b>Результаты поиска:</b>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 
 # =========================================================
@@ -684,7 +845,10 @@ def main():
         .build()
     )
 
-    # Обычные команды
+    # =====================================================
+    # КОМАНДЫ
+    # =====================================================
+
     bot.add_handler(
         CommandHandler(
             "start",
@@ -699,7 +863,10 @@ def main():
         )
     )
 
-    # Админские команды
+    # =====================================================
+    # АДМИНСКИЕ КОМАНДЫ
+    # =====================================================
+
     bot.add_handler(
         CommandHandler(
             "set",
@@ -714,14 +881,20 @@ def main():
         )
     )
 
-    # Кнопки
+    # =====================================================
+    # КНОПКИ
+    # =====================================================
+
     bot.add_handler(
         CallbackQueryHandler(
             buttons
         )
     )
 
-    # Получение видео
+    # =====================================================
+    # ПОЛУЧЕНИЕ ВИДЕО
+    # =====================================================
+
     bot.add_handler(
         MessageHandler(
             filters.VIDEO,
@@ -729,15 +902,39 @@ def main():
         )
     )
 
-    # Запускаем веб-сервер
+    # =====================================================
+    # ПОИСК
+    # =====================================================
+
+    bot.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            search_text
+        )
+    )
+
+    # =====================================================
+    # WEB SERVER
+    # =====================================================
+
     threading.Thread(
         target=run_server,
         daemon=True
     ).start()
 
-    # Запускаем Telegram-бота
+    # =====================================================
+    # ЗАПУСК БОТА
+    # =====================================================
+
+    print("КАНЬОН АНИМЕ БОТ ЗАПУЩЕН!")
+
     bot.run_polling()
 
 
+# =========================================================
+# START
+# =========================================================
+
 if __name__ == "__main__":
+
     main()
